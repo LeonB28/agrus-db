@@ -3,8 +3,8 @@ use arrow::csv;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
 use std::fs;
+use crate::datasource::DataSource;
 
-use crate::datasource::datasource::DataSource;
 pub struct CsvDataSource {
     file_path: String,
     has_header: bool,
@@ -22,7 +22,6 @@ impl CsvDataSource {
 }
 
 impl DataSource for CsvDataSource {
-    
     #[warn(unused_variables)]
     fn scan(columns: Vec<String>) -> AgrusResult<Vec<RecordBatch>> {
         unimplemented!()
@@ -31,10 +30,11 @@ impl DataSource for CsvDataSource {
     fn schema(&self) -> AgrusResult<Schema> {
         csv::infer_schema_from_files(
             &[self.file_path.clone()],
-            u8::try_from(self.delimiter).unwrap(),
+            self.delimiter,
             Some(200),
             self.has_header,
-        ).map_err(AgrusError::from)
+        )
+        .map_err(AgrusError::from)
     }
 }
 
@@ -49,7 +49,6 @@ mod tests {
         let csv_content = "col1,col2\n1,a\n2,b";
         fs::create_dir_all("data").unwrap();
         fs::write("data/test.csv", csv_content).unwrap();
-        
         let csv_ds = CsvDataSource::new("data/test.csv".to_string(), true, b',');
         let schema = csv_ds.schema().unwrap();
         assert_eq!(schema.fields().len(), 2);
@@ -59,7 +58,6 @@ mod tests {
             Field::new("col2", DataType::Utf8, true),
         ]);
         assert_eq!(schema, schema_to_compare);
-        
         // Cleanup
         fs::remove_file("data/test.csv").unwrap();
         fs::remove_dir_all("data").unwrap();
