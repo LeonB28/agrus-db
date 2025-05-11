@@ -2,6 +2,7 @@ use crate::datasource::DataSource;
 use crate::errors::{AgrusError, AgrusResult};
 use arrow::csv;
 use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{SchemaRef};
 use arrow::record_batch::RecordBatch;
 use std::fs::File;
 use std::sync::Arc;
@@ -23,16 +24,14 @@ impl CsvDataSource {
 }
 
 impl DataSource for CsvDataSource {
-    fn scan(&self, columns: Vec<String>) -> AgrusResult<Vec<RecordBatch>> {
-        // 1. Get the full schema of the CSV file. This is important for correct parsing.
-        let full_file_schema: Arc<Schema> = Arc::new(self.schema()?);
+    fn scan(&self, columns: &[&str]) -> AgrusResult<Vec<RecordBatch>> {
+        let full_file_schema: SchemaRef = self.schema()?;
 
-        // 2. Determine the projection (which columns to select).
         let projection_indices: Option<Vec<usize>> = if columns.is_empty() {
             None
         } else {
             let mut indices = Vec::with_capacity(columns.len());
-            for col_name in &columns {
+            for col_name in columns.iter().copied() {
                 match full_file_schema.index_of(col_name) {
                     Ok(idx) => indices.push(idx),
                     Err(_) => {
@@ -72,23 +71,26 @@ impl DataSource for CsvDataSource {
         batches_result.map_err(AgrusError::from)
     }
 
-    fn schema(&self) -> AgrusResult<Schema> {
-        csv::infer_schema_from_files(
+    fn schema(&self) -> AgrusResult<SchemaRef> {
+        let schema_from_files = csv::infer_schema_from_files(
             &[self.file_path.clone()],
             self.delimiter,
             Some(200),
             self.has_header,
-        )
-        .map_err(AgrusError::from)
+        );
+        match schema_from_files {
+            Ok(schema) => Ok(Arc::new(schema)),
+            Err(e) => Err(AgrusError::from(e)),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::datatypes::{DataType, Field};
-    use std::fs;
+    use arrow::datatypes::{DataType, Field, Schema};
     use arrow::util::pretty::pretty_format_batches;
+    use std::fs;
 
     #[test]
     fn can_read_schema_from_csv() {
@@ -100,10 +102,10 @@ mod tests {
         let schema = csv_ds.schema().unwrap();
         assert_eq!(schema.fields().len(), 2);
 
-        let schema_to_compare = Schema::new(vec![
+        let schema_to_compare = Arc::new(Schema::new(vec![
             Field::new("col1", DataType::Int64, true),
             Field::new("col2", DataType::Utf8, true),
-        ]);
+        ]));
         assert_eq!(schema, schema_to_compare);
         // Cleanup
         fs::remove_file("data/test.csv").unwrap();
@@ -118,7 +120,7 @@ mod tests {
         fs::write("data/test.csv", csv_content).unwrap();
         let csv_ds = CsvDataSource::new("data/test.csv".to_string(), true, b',');
         let batches = csv_ds
-            .scan(vec!["col1".to_string(), "col2".to_string()])
+            .scan(&["col1", "col2"])
             .unwrap();
         assert_eq!(batches.len(), 1);
         let batch = &batches[0];

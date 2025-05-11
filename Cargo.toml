@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 arrow = { version = "55.0.0", features = ["prettyprint"] }
+parquet = "55.0.0"
